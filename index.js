@@ -27,7 +27,10 @@ export async function connectToMongoDB() {
   }
 }
 
-connectToMongoDB();
+const connectedClient = await connectToMongoDB();
+const database = connectedClient.db('salonbook');
+const users = database.collection('user');
+const services = database.collection('services');
 
 
 
@@ -35,7 +38,21 @@ app.get('/', (req, res)=> {
 res.send ('SalonBook server is running!');
 });
 
+//Users collection 
+app.get('/users', async (req, res)=>{
+  const cursor = users.find({});
+  const result = await cursor.toArray();
+  res.send(result);
+});
 
+
+
+
+
+
+
+
+//Listen last part 
 
 app.listen(port, () => {
     console.log(`SalonBook server is running on port ${port}`);
