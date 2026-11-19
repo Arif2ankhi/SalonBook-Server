@@ -171,6 +171,36 @@ app.get('/users/profile', async (req, res) => {
   });
 });
 
+// PATCH update permitted profile fields (Name, Image, Phone only)
+app.patch('/users/profile', async (req, res) => {
+  const { email, requesterEmail, name, image, phone } = req.body;
+
+  if (!email || !requesterEmail || email !== requesterEmail) {
+    return res
+      .status(403)
+      .send({ message: 'Unauthorized: You can only update your own profile.' });
+  }
+
+  if (!name || !name.trim()) {
+    return res.status(400).send({ message: 'Full name cannot be empty.' });
+  }
+
+  const safeUpdates = {
+    name: name.trim(),
+    image: typeof image === 'string' ? image.trim() : '',
+    phone: typeof phone === 'string' ? phone.trim() : '',
+    updatedAt: new Date().toISOString(),
+  };
+
+  const result = await users.updateOne({ email }, { $set: safeUpdates });
+
+  if (result.matchedCount === 0) {
+    return res.status(404).send({ message: 'User profile not found.' });
+  }
+
+  res.send({ message: 'Profile updated successfully.', ...safeUpdates });
+});
+
 // Service related Api 
 app.post('/services', async (req, res) => {
   const service = req.body;
