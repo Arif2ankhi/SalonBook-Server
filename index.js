@@ -139,13 +139,39 @@ app.get('/', (req, res) => {
   res.send('SalonBook server is running!');
 });
 
-// ================= USERS =================
+// Users related Api 
 app.get('/users', async (req, res) => {
   const result = await users.find({}).toArray();
   res.send(result);
 });
 
-// ================= SERVICES =================
+//Get single user profile (Customer and Admin)
+
+// GET single user profile (Customer & Admin)
+app.get('/users/profile', async (req, res) => {
+  const { email } = req.query;
+  if (!email) {
+    return res.status(400).send({ message: 'Email is required.' });
+  }
+
+  const user = await users.findOne({ email });
+  if (!user) {
+    return res.status(404).send({ message: 'User not found.' });
+  }
+
+  res.send({
+    _id: user._id,
+    name: user.name || '',
+    email: user.email,
+    image: user.image || '',
+    phone: user.phone || '',
+    role: user.role || 'customer',
+    isBlocked: Boolean(user.isBlocked),
+    createdAt: user.createdAt || null,
+  });
+});
+
+// Service related Api 
 app.post('/services', async (req, res) => {
   const service = req.body;
   const result = await services.insertOne(service);
@@ -194,7 +220,7 @@ app.delete('/services/:id', async (req, res) => {
   res.send(result);
 });
 
-// ================= APPOINTMENTS =================
+
 // Create appointment request (Customer only, Active service only, No duplicate slot)
 app.post('/appointments', async (req, res) => {
   try {
