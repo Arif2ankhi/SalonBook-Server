@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { MongoClient } from 'mongodb';
+import { MongoClient, ObjectId  } from 'mongodb';
 import 'dotenv/config'
 
 const app = express();
@@ -45,6 +45,33 @@ app.get('/users', async (req, res)=>{
   res.send(result);
 });
 
+//services related API post service to mongoDb
+
+app.post('/services', async(req, res)=>{
+  const service = req.body;
+  const result = await services.insertOne(service);
+  res.send(result)
+})
+
+//Get update and delete services related api 
+
+
+// GET all services (or filter ?status=Active on public Browse Services page)
+app.get("/services", async (req, res) => {
+  const query = {};
+  if (req.query.status === "Active") {
+    query.$or = [{ status: "Active" }, { status: { $exists: false } }];
+  }
+  const result = await services.find(query).toArray();
+  res.send(result);
+});
+
+// DELETE a service
+app.delete("/services/:id", async (req, res) => {
+  const id = req.params.id;
+  const result = await services.deleteOne({ _id: new ObjectId(id) });
+  res.send(result);
+});
 
 
 
