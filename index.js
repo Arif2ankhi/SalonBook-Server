@@ -190,73 +190,148 @@ app.delete('/services/:id', async (req, res) => {
 
 
 // Create appointment request (Customer only, Active service only, No duplicate slot)
+// app.post('/appointments', async (req, res) => {
+//   try {
+//     const {
+//       serviceId,
+//       customerId,
+//       customerName,
+//       customerEmail,
+//       serviceName,
+//       serviceImage,
+//       serviceCategory,
+//       servicePrice,
+//       appointmentDate,
+//       timeSlot,
+//       message,
+//       role,
+//     } = req.body;
+
+//     if (role === 'admin') {
+//       return res.status(403).send({ message: 'Admins cannot book customer appointments.' });
+//     }
+
+//     if (!ObjectId.isValid(serviceId)) {
+//       return res.status(400).send({ message: 'Invalid service ID.' });
+//     }
+
+//     // 1. Ensure service exists and is Active
+//     const service = await services.findOne({ _id: new ObjectId(serviceId) });
+//     if (!service || service.status === 'Inactive' || service.isActive === false) {
+//       return res.status(400).send({ message: 'This service is currently unavailable for booking.' });
+//     }
+
+//     // 2. Prevent duplicate active appointment for same service, date & time slot
+//     const existingSlot = await appointments.findOne({
+//       serviceId,
+//       appointmentDate,
+//       timeSlot,
+//       status: { $in: ['Pending', 'Confirmed'] },
+//     });
+
+//     if (existingSlot) {
+//       return res
+//         .status(409)
+//         .send({ message: 'This time slot is already booked. Please choose another time.' });
+//     }
+
+//     const newAppointment = {
+//       serviceId,
+//       serviceName,
+//       serviceImage,
+//       serviceCategory,
+//       servicePrice: Number(servicePrice),
+//       customerId,
+//       customerName,
+//       customerEmail,
+//       appointmentDate,
+//       timeSlot,
+//       message: message || '',
+//       status: 'Pending',
+//       paymentStatus: 'Unpaid',
+//       createdAt: new Date().toISOString(),
+//     };
+
+//     const result = await appointments.insertOne(newAppointment);
+//     res.status(201).send(result);
+//   } catch (error) {
+//     res.status(500).send({ message: 'Failed to submit appointment request.' });
+//   }
+// });
 app.post('/appointments', async (req, res) => {
-  try {
-    const {
-      serviceId,
-      customerId,
-      customerName,
-      customerEmail,
-      serviceName,
-      serviceImage,
-      serviceCategory,
-      servicePrice,
-      appointmentDate,
-      timeSlot,
-      message,
-      role,
-    } = req.body;
+  const {
+    serviceId,
+    customerId,
+    customerName,
+    customerEmail,
+    serviceName,
+    serviceImage,
+    serviceCategory,
+    servicePrice,
+    appointmentDate,
+    timeSlot,
+    message,
+    role,
+  } = req.body;
 
-    if (role === 'admin') {
-      return res.status(403).send({ message: 'Admins cannot book customer appointments.' });
-    }
-
-    if (!ObjectId.isValid(serviceId)) {
-      return res.status(400).send({ message: 'Invalid service ID.' });
-    }
-
-    // 1. Ensure service exists and is Active
-    const service = await services.findOne({ _id: new ObjectId(serviceId) });
-    if (!service || service.status === 'Inactive' || service.isActive === false) {
-      return res.status(400).send({ message: 'This service is currently unavailable for booking.' });
-    }
-
-    // 2. Prevent duplicate active appointment for same service, date & time slot
-    const existingSlot = await appointments.findOne({
-      serviceId,
-      appointmentDate,
-      timeSlot,
-      status: { $in: ['Pending', 'Confirmed'] },
-    });
-
-    if (existingSlot) {
-      return res
-        .status(409)
-        .send({ message: 'This time slot is already booked. Please choose another time.' });
-    }
-
-    const newAppointment = {
-      serviceId,
-      serviceName,
-      serviceImage,
-      serviceCategory,
-      servicePrice: Number(servicePrice),
-      customerId,
-      customerName,
-      customerEmail,
-      appointmentDate,
-      timeSlot,
-      message: message || '',
-      status: 'Pending',
-      paymentStatus: 'Unpaid',
-      createdAt: new Date().toISOString(),
-    };
-
-    const result = await appointments.insertOne(newAppointment);
-    res.status(201).send(result);
-  } catch (error) {
-    res.status(500).send({ message: 'Failed to submit appointment request.' });
+  if (role === 'admin') {
+    return res
+      .status(403)
+      .send({ message: 'Admins cannot book customer appointments.' });
   }
+
+  const customerRecord = await users.findOne({ email: customerEmail });
+  if (customerRecord?.isBlocked) {
+    return res.status(403).send({
+      message: 'Your account is currently blocked. Please contact the salon.',
+    });
+  }
+
+  if (!ObjectId.isValid(serviceId)) {
+    return res.status(400).send({ message: 'Invalid service ID.' });
+  }
+
+  // 1. Ensure service exists and is Active
+  const service = await services.findOne({ _id: new ObjectId(serviceId) });
+  if (!service || service.status === 'Inactive' || service.isActive === false) {
+    return res
+      .status(400)
+      .send({ message: 'This service is currently unavailable for booking.' });
+  }
+
+  // 2. Prevent duplicate active appointment for same service, date & time slot
+  const existingSlot = await appointments.findOne({
+    serviceId,
+    appointmentDate,
+    timeSlot,
+    status: { $in: ['Pending', 'Confirmed'] },
+  });
+
+  if (existingSlot) {
+    return res.status(409).send({
+      message: 'This time slot is already booked. Please choose another time.',
+    });
+  }
+
+  const newAppointment = {
+    serviceId,
+    serviceName,
+    serviceImage,
+    serviceCategory,
+    servicePrice: Number(servicePrice),
+    customerId,
+    customerName,
+    customerEmail,
+    appointmentDate,
+    timeSlot,
+    message: message || '',
+    status: 'Pending',
+    paymentStatus: 'Unpaid',
+    createdAt: new Date().toISOString(),
+  };
+
+  const result = await appointments.insertOne(newAppointment);
+  res.status(201).send(result);
 });
 
 // Get appointments (filter by ?email= or ?customerId= for Customer, all for Admin)
@@ -269,20 +344,7 @@ app.get('/appointments', async (req, res) => {
   res.send(result);
 });
 
-// Update appointment status (Customer cancels Pending; Admin Confirms or Cancels)
-// app.patch('/appointments/:id', async (req, res) => {
-//   const { id } = req.params;
-//   if (!ObjectId.isValid(id)) {
-//     return res.status(400).send({ message: 'Invalid appointment ID' });
-//   }
-//   const result = await appointments.updateOne(
-//     { _id: new ObjectId(id) },
-//     { $set: req.body }
-//   );
-//   res.send(result);
-// });
 
-// 
 
 // Update appointment status rull based (Server-enforced transitions)
 app.patch('/appointments/:id', async (req, res) => {
