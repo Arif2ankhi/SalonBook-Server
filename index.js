@@ -332,14 +332,54 @@ app.get('/appointments', async (req, res) => {
 });
 
 // Update appointment status (Customer cancels Pending; Admin Confirms or Cancels)
+// app.patch('/appointments/:id', async (req, res) => {
+//   const { id } = req.params;
+//   if (!ObjectId.isValid(id)) {
+//     return res.status(400).send({ message: 'Invalid appointment ID' });
+//   }
+//   const result = await appointments.updateOne(
+//     { _id: new ObjectId(id) },
+//     { $set: req.body }
+//   );
+//   res.send(result);
+// });
+
+// 
+
+// Update appointment status rull based (Server-enforced transitions)
 app.patch('/appointments/:id', async (req, res) => {
   const { id } = req.params;
+  const { status } = req.body;
+
   if (!ObjectId.isValid(id)) {
-    return res.status(400).send({ message: 'Invalid appointment ID' });
+    return res.status(400).send({ message: 'Invalid appointment ID.' });
   }
+
+  const existing = await appointments.findOne({ _id: new ObjectId(id) });
+  if (!existing) {
+    return res.status(404).send({ message: 'Appointment not found.' });
+  }
+
+  // Rule: Only Pending appointments can be Confirmed
+  if (status === 'Confirmed' && existing.status !== 'Pending') {
+    return res
+      .status(400)
+      .send({ message: 'Only pending appointments can be confirmed.' });
+  }
+
+  // Rule: Only Pending or Confirmed appointments can be Cancelled
+  if (
+    status === 'Cancelled' &&
+    !['Pending', 'Confirmed'].includes(existing.status)
+  ) {
+    return res
+      .status(400)
+      .send({ message: 'This appointment is already cancelled.' });
+  }
+
   const result = await appointments.updateOne(
     { _id: new ObjectId(id) },
-    { $set: req.body }
+    { $set: { ...req.body, updatedAt: new Date().toISOString() } }
   );
   res.send(result);
 });
