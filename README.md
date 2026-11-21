@@ -6,12 +6,12 @@ RESTful backend API for **SalonBook**, a role-based salon service and appointmen
 
 ## 🌐 Live Links & Repositories
 
-- **Live API Server:** [https://salonbook-server.vercel.app](https://salonbook-server.vercel.app)
-- **Live Client App:** [https://salonbook-client.vercel.app](https://salonbook-client.vercel.app)
-- **Server Repository:** [https://github.com/Arif2ankhi/salonbook-server](https://github.com/Arif2ankhi/salonbook-server)
-- **Client Repository:** [https://github.com/Arif2ankhi/salonbook-client](https://github.com/Arif2ankhi/salonbook-client)
+- **Live API Server:** https://salonbook-server-sigma.vercel.app
+- **Live Client App:** https://salonbook-client-gules.vercel.app/
+- **Server Repository:** https://github.com/Arif2ankhi/salonbook-server
+- **Client Repository:** https://github.com/Arif2ankhi/salonbook-client
 
----
+
 
 ## 🧰 Technology Stack
 
