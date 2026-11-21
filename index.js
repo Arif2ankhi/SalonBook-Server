@@ -1,8 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import { MongoClient, ObjectId } from 'mongodb';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import 'dotenv/config';
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -10,7 +13,7 @@ const port = process.env.PORT || 5000;
 app.use(express.json());
 app.use(
   cors({
-    origin: ['http://localhost:3000'],
+    origin: [process.env.CLIENT_URL || 'http://localhost:3000'],
     credentials: true,
   })
 );
@@ -34,22 +37,56 @@ const database = connectedClient.db('salonbook');
 const users = database.collection('user');
 const services = database.collection('services');
 const appointments = database.collection('appointments');
-const transactions = database.collection('transactions')
+const transactions = database.collection('transactions');
+
+// JWT Verification Middlewares (Better Auth JWKS via jose)
+const JWKS = createRemoteJWKSet(
+  new URL(`${process.env.CLIENT_URL || 'http://localhost:3000'}/api/auth/jwks`)
+);
+
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.log(' No JWT Token found in request:', req.originalUrl);
+    return res.status(401).send({ message: 'Unauthorized access.' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  if (!token) {
+    return res.status(401).send({ message: 'Unauthorized access.' });
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    req.decoded = payload;
+    console.log('✅ JWT Verified for:', payload.email, '| Route:', req.originalUrl);
+    next();
+  } catch (err) {
+    console.log(' Invalid JWT Token:', err.message);
+    return res.status(401).send({ message: 'Invalid or expired token.' });
+  }
+};
+
+const verifyAdmin = async (req, res, next) => {
+  const dbUser = await users.findOne({ email: req.decoded?.email });
+  if (dbUser?.role !== 'admin') {
+    return res.status(403).send({ message: 'Forbidden: Admin access only.' });
+  }
+  next();
+};
 
 app.get('/', (req, res) => {
   res.send('SalonBook server is running!');
 });
 
-// Users related Api 
-app.get('/users', async (req, res) => {
+// Users related API
+app.get('/users', verifyToken, verifyAdmin, async (req, res) => {
   const result = await users.find({}).toArray();
   res.send(result);
 });
 
-//Get single user profile (Customer and Admin)
-
 // GET single user profile (Customer & Admin)
-app.get('/users/profile', async (req, res) => {
+app.get('/users/profile', verifyToken, async (req, res) => {
   const { email } = req.query;
   if (!email) {
     return res.status(400).send({ message: 'Email is required.' });
@@ -73,7 +110,7 @@ app.get('/users/profile', async (req, res) => {
 });
 
 // PATCH update permitted profile fields (Name, Image, Phone only)
-app.patch('/users/profile', async (req, res) => {
+app.patch('/users/profile', verifyToken, async (req, res) => {
   const { email, requesterEmail, name, image, phone } = req.body;
 
   if (!email || !requesterEmail || email !== requesterEmail) {
@@ -103,7 +140,7 @@ app.patch('/users/profile', async (req, res) => {
 });
 
 // PATCH block or unblock a customer account (Admin only)
-app.patch('/users/:id/status', async (req, res) => {
+app.patch('/users/:id/status', verifyToken, verifyAdmin, async (req, res) => {
   const { id } = req.params;
   const { isBlocked } = req.body;
 
@@ -140,9 +177,8 @@ app.patch('/users/:id/status', async (req, res) => {
   });
 });
 
-
-// Service related Api 
-app.post('/services', async (req, res) => {
+// Service related API
+app.post('/services', verifyToken, verifyAdmin, async (req, res) => {
   const service = req.body;
   const result = await services.insertOne(service);
   res.send(result);
@@ -188,7 +224,7 @@ app.get('/services/:id', async (req, res) => {
   res.send(result);
 });
 
-app.patch('/services/:id', async (req, res) => {
+app.patch('/services/:id', verifyToken, verifyAdmin, async (req, res) => {
   const { id } = req.params;
   if (!ObjectId.isValid(id)) {
     return res.status(400).send({ message: 'Invalid service ID' });
@@ -200,7 +236,7 @@ app.patch('/services/:id', async (req, res) => {
   res.send(result);
 });
 
-app.delete('/services/:id', async (req, res) => {
+app.delete('/services/:id', verifyToken, verifyAdmin, async (req, res) => {
   const { id } = req.params;
   if (!ObjectId.isValid(id)) {
     return res.status(400).send({ message: 'Invalid service ID' });
@@ -209,77 +245,8 @@ app.delete('/services/:id', async (req, res) => {
   res.send(result);
 });
 
-
 // Create appointment request (Customer only, Active service only, No duplicate slot)
-// app.post('/appointments', async (req, res) => {
-//   try {
-//     const {
-//       serviceId,
-//       customerId,
-//       customerName,
-//       customerEmail,
-//       serviceName,
-//       serviceImage,
-//       serviceCategory,
-//       servicePrice,
-//       appointmentDate,
-//       timeSlot,
-//       message,
-//       role,
-//     } = req.body;
-
-//     if (role === 'admin') {
-//       return res.status(403).send({ message: 'Admins cannot book customer appointments.' });
-//     }
-
-//     if (!ObjectId.isValid(serviceId)) {
-//       return res.status(400).send({ message: 'Invalid service ID.' });
-//     }
-
-//     // 1. Ensure service exists and is Active
-//     const service = await services.findOne({ _id: new ObjectId(serviceId) });
-//     if (!service || service.status === 'Inactive' || service.isActive === false) {
-//       return res.status(400).send({ message: 'This service is currently unavailable for booking.' });
-//     }
-
-//     // 2. Prevent duplicate active appointment for same service, date & time slot
-//     const existingSlot = await appointments.findOne({
-//       serviceId,
-//       appointmentDate,
-//       timeSlot,
-//       status: { $in: ['Pending', 'Confirmed'] },
-//     });
-
-//     if (existingSlot) {
-//       return res
-//         .status(409)
-//         .send({ message: 'This time slot is already booked. Please choose another time.' });
-//     }
-
-//     const newAppointment = {
-//       serviceId,
-//       serviceName,
-//       serviceImage,
-//       serviceCategory,
-//       servicePrice: Number(servicePrice),
-//       customerId,
-//       customerName,
-//       customerEmail,
-//       appointmentDate,
-//       timeSlot,
-//       message: message || '',
-//       status: 'Pending',
-//       paymentStatus: 'Unpaid',
-//       createdAt: new Date().toISOString(),
-//     };
-
-//     const result = await appointments.insertOne(newAppointment);
-//     res.status(201).send(result);
-//   } catch (error) {
-//     res.status(500).send({ message: 'Failed to submit appointment request.' });
-//   }
-// });
-app.post('/appointments', async (req, res) => {
+app.post('/appointments', verifyToken, async (req, res) => {
   const {
     serviceId,
     customerId,
@@ -356,7 +323,8 @@ app.post('/appointments', async (req, res) => {
 });
 
 // Get appointments (filter by ?email= or ?customerId= for Customer, all for Admin)
-app.get('/appointments', async (req, res) => {
+app.get('/appointments', verifyToken, async (req, res) => {
+// app.get('/appointments',  async (req, res) => {
   const query = {};
   if (req.query.email) query.customerEmail = req.query.email;
   if (req.query.customerId) query.customerId = req.query.customerId;
@@ -365,10 +333,8 @@ app.get('/appointments', async (req, res) => {
   res.send(result);
 });
 
-
-
-// Update appointment status rull based (Server-enforced transitions)
-app.patch('/appointments/:id', async (req, res) => {
+// Update appointment status rule based (Server-enforced transitions)
+app.patch('/appointments/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
@@ -405,10 +371,8 @@ app.patch('/appointments/:id', async (req, res) => {
   res.send(result);
 });
 
-
-
 // 1. Create Stripe Checkout Session (Confirmed & Unpaid appointments only)
-app.post('/create-checkout-session', async (req, res) => {
+app.post('/create-checkout-session', verifyToken, async (req, res) => {
   const { appointmentId, customerEmail } = req.body;
 
   if (!ObjectId.isValid(appointmentId)) {
@@ -438,7 +402,6 @@ app.post('/create-checkout-session', async (req, res) => {
   const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
 
   const session = await stripe.checkout.sessions.create({
-    payment_method_types: ['card'],
     mode: 'payment',
     customer_email: customerEmail || appointment.customerEmail,
     line_items: [
@@ -529,7 +492,7 @@ app.get('/payments/verify/:sessionId', async (req, res) => {
 });
 
 // 3. Get All Transactions (Read-only for Admin Transactions Page)
-app.get('/transactions', async (req, res) => {
+app.get('/transactions', verifyToken, verifyAdmin, async (req, res) => {
   const result = await transactions.find().sort({ createdAt: -1 }).toArray();
   res.send(result);
 });
