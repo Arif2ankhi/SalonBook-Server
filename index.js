@@ -59,7 +59,7 @@ const verifyToken = async (req, res, next) => {
   try {
     const { payload } = await jwtVerify(token, JWKS);
     req.decoded = payload;
-    console.log('✅ JWT Verified for:', payload.email, '| Route:', req.originalUrl);
+    // console.log(' JWT Verified for:', payload.email, '| Route:', req.originalUrl);
     next();
   } catch (err) {
     console.log(' Invalid JWT Token:', err.message);
@@ -500,3 +500,5 @@ app.get('/transactions', verifyToken, verifyAdmin, async (req, res) => {
 app.listen(port, () => {
   console.log(`SalonBook server is running on port ${port}`);
 });
+
+export default app;
