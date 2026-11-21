@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { MongoClient, ObjectId } from 'mongodb';
 import 'dotenv/config';
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -9,7 +10,7 @@ const port = process.env.PORT || 5000;
 app.use(express.json());
 app.use(
   cors({
-    origin: ['http://localhost:3000', 'http://localhost:3001'],
+    origin: ['http://localhost:3000'],
     credentials: true,
   })
 );
@@ -33,6 +34,7 @@ const database = connectedClient.db('salonbook');
 const users = database.collection('user');
 const services = database.collection('services');
 const appointments = database.collection('appointments');
+const transactions = database.collection('transactions')
 
 app.get('/', (req, res) => {
   res.send('SalonBook server is running!');
@@ -400,6 +402,135 @@ app.patch('/appointments/:id', async (req, res) => {
     { _id: new ObjectId(id) },
     { $set: { ...req.body, updatedAt: new Date().toISOString() } }
   );
+  res.send(result);
+});
+
+
+
+// 1. Create Stripe Checkout Session (Confirmed & Unpaid appointments only)
+app.post('/create-checkout-session', async (req, res) => {
+  const { appointmentId, customerEmail } = req.body;
+
+  if (!ObjectId.isValid(appointmentId)) {
+    return res.status(400).send({ message: 'Invalid appointment ID.' });
+  }
+
+  const appointment = await appointments.findOne({
+    _id: new ObjectId(appointmentId),
+  });
+
+  if (!appointment) {
+    return res.status(404).send({ message: 'Appointment not found.' });
+  }
+
+  if (appointment.status !== 'Confirmed') {
+    return res
+      .status(400)
+      .send({ message: 'Only confirmed appointments can be paid.' });
+  }
+
+  if (appointment.paymentStatus === 'Paid') {
+    return res
+      .status(400)
+      .send({ message: 'This appointment is already paid.' });
+  }
+
+  const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ['card'],
+    mode: 'payment',
+    customer_email: customerEmail || appointment.customerEmail,
+    line_items: [
+      {
+        price_data: {
+          currency: 'gbp',
+          product_data: {
+            name: appointment.serviceName,
+            description: `Appointment on ${appointment.appointmentDate} at ${appointment.timeSlot}`,
+          },
+          unit_amount: Math.round(Number(appointment.servicePrice) * 100),
+        },
+        quantity: 1,
+      },
+    ],
+    metadata: {
+      appointmentId: appointment._id.toString(),
+      customerId: appointment.customerId || '',
+      customerName: appointment.customerName || '',
+      customerEmail: appointment.customerEmail || '',
+      serviceName: appointment.serviceName || '',
+    },
+    success_url: `${clientUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${clientUrl}/payment/cancel?appointment_id=${appointment._id.toString()}`,
+  });
+
+  res.send({ url: session.url, sessionId: session.id });
+});
+
+// 2. Verify Stripe Session, Mark Appointment Paid & Save Transaction
+app.get('/payments/verify/:sessionId', async (req, res) => {
+  const { sessionId } = req.params;
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+  const isPaid = session.payment_status === 'paid';
+  const {
+    appointmentId,
+    customerId,
+    customerName,
+    customerEmail,
+    serviceName,
+  } = session.metadata || {};
+
+  if (isPaid && appointmentId && ObjectId.isValid(appointmentId)) {
+    await appointments.updateOne(
+      { _id: new ObjectId(appointmentId) },
+      {
+        $set: {
+          paymentStatus: 'Paid',
+          stripeSessionId: session.id,
+          updatedAt: new Date().toISOString(),
+        },
+      }
+    );
+
+    const existingTx = await transactions.findOne({
+      stripeSessionId: session.id,
+    });
+
+    if (!existingTx) {
+      await transactions.insertOne({
+        appointmentId,
+        customerId: customerId || '',
+        customerName: customerName || '',
+        customerEmail: customerEmail || session.customer_email || '',
+        serviceName: serviceName || 'Salon Service',
+        amount: (session.amount_total || 0) / 100,
+        currency: (session.currency || 'gbp').toUpperCase(),
+        stripeSessionId: session.id,
+        status: 'paid',
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  const appointment =
+    appointmentId && ObjectId.isValid(appointmentId)
+      ? await appointments.findOne({ _id: new ObjectId(appointmentId) })
+      : null;
+
+  res.send({
+    verified: isPaid,
+    stripeSessionId: session.id,
+    amount: (session.amount_total || 0) / 100,
+    currency: (session.currency || 'gbp').toUpperCase(),
+    appointment,
+  });
+});
+
+// 3. Get All Transactions (Read-only for Admin Transactions Page)
+app.get('/transactions', async (req, res) => {
+  const result = await transactions.find().sort({ createdAt: -1 }).toArray();
   res.send(result);
 });
 
