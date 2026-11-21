@@ -155,6 +155,25 @@ app.get('/services', async (req, res) => {
   res.send(result);
 });
 
+// Featured active services for the home page (default 6, newest first)
+app.get('/services/featured', async (req, res) => {
+  const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 6;
+  const result = await services
+    .find({ $or: [{ status: 'Active' }, { status: { $exists: false } }] })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .toArray();
+  res.send(result);
+});
+
+// Distinct categories of active services for the home page
+app.get('/services/categories', async (req, res) => {
+  const result = await services.distinct('category', {
+    $or: [{ status: 'Active' }, { status: { $exists: false } }],
+  });
+  res.send(result);
+});
+
 app.get('/services/:id', async (req, res) => {
   const { id } = req.params;
   if (!ObjectId.isValid(id)) {
